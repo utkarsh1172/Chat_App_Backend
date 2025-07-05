@@ -55,29 +55,29 @@ io.on("connection", (socket) => {
 
   // Send message and store in DB
   socket.on("send_message", async ({ senderId, receiverId, message }) => {
-    try {
-      const newMessage = new Message({
+  try {
+    const newMessage = new Message({
+      senderId,
+      receiverId,
+      text: message,
+      timestamp: new Date(),
+    });
+    await newMessage.save();
+
+    const targetSocket = onlineUsers[receiverId];
+    if (targetSocket) {
+      io.to(targetSocket).emit("receive_message", {
         senderId,
-        receiverId,
-        text: message,
-        timestamp: new Date(),
+        message,
+        timestamp: newMessage.timestamp,
       });
-      await newMessage.save();
-
-      const targetSocket = onlineUsers[receiverId];
-      if (targetSocket) {
-        io.to(targetSocket).emit("receive_message", {
-          senderId,
-          message,
-          timestamp: newMessage.timestamp,
-        });
-      }
-
-      console.log(`📩 Message sent from ${senderId} to ${receiverId}`);
-    } catch (err) {
-      console.error("❌ Error saving message:", err);
     }
-  });
+
+    console.log(`📩 Message sent from ${senderId} to ${receiverId}`);
+  } catch (err) {
+    console.error("❌ Error saving message:", err);
+  }
+});
 
   socket.on("typing", ({ to }) => {
     const targetSocket = onlineUsers[to];
@@ -96,6 +96,23 @@ io.on("connection", (socket) => {
       console.log(`❌ Socket ${socket.id} disconnected`);
     }
   });
+});
+app.post("/get-messages", async (req, res) => {
+  const { senderId, receiverId } = req.body;
+
+  try {
+    const messages = await Message.find({
+      $or: [
+        { senderId, receiverId },
+        { senderId: receiverId, receiverId: senderId },
+      ],
+    }).sort({ timestamp: 1 }); // oldest to newest
+
+    res.send({ status: "ok", data: messages });
+  } catch (error) {
+    console.error("Error fetching messages:", error);
+    res.status(500).send({ status: "error", error });
+  }
 });
 
 app.post("/register", async (req, res) => {
@@ -171,6 +188,6 @@ app.get("/get-all-user", async (req, res) => {
 });
 
 
-app.listen(5001,  () => {
+server.listen(5001, () => {
   console.log("Server running at 0.0.0.0:5001");
 });
