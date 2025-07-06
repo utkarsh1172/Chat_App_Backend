@@ -54,13 +54,14 @@ io.on("connection", (socket) => {
   });
 
   // Send message and store in DB
-  socket.on("send_message", async ({ senderId, receiverId, message }) => {
+  socket.on("send_message", async ({ senderId, receiverId, message, image }) => {
   try {
     const newMessage = new Message({
       senderId,
       receiverId,
       text: message,
       timestamp: new Date(),
+        image: image || null,
     });
     await newMessage.save();
 
@@ -69,7 +70,9 @@ io.on("connection", (socket) => {
       io.to(targetSocket).emit("receive_message", {
         senderId,
         message,
+        image,
         timestamp: newMessage.timestamp,
+         seen: false,
       });
     }
 
@@ -115,53 +118,90 @@ app.post("/get-messages", async (req, res) => {
   }
 });
 
+app.post("/mark-seen", async (req, res) => {
+  const { senderId, receiverId } = req.body;
+
+  try {
+    await Message.updateMany(
+      { senderId, receiverId, seen: false },
+      { $set: { seen: true } }
+    );
+
+    // Notify sender in real-time
+    const senderSocket = onlineUsers[senderId];
+    if (senderSocket) {
+      io.to(senderSocket).emit("message_seen", {
+        senderId,
+        receiverId,
+      });
+    }
+
+    res.send({ status: "ok" });
+  } catch (err) {
+    res.status(500).send({ status: "error", error: err });
+  }
+});
+
 app.post("/register", async (req, res) => {
-  const { name, email, mobile, password, userType } = req.body;
+  const { name, email, mobile, password } = req.body;
   console.log(req.body);
 
   const oldUser = await User.findOne({ email: email });
 
   if (oldUser) {
-    return res.send({ data: "User already exists!!" });
+    return res.send({ status: "error", message: "User already exists!" });
   }
+
   const encryptedPassword = await bcrypt.hash(password, 10);
 
   try {
-    await User.create({
+    const savedUser = await User.create({
       name: name,
       email: email,
-      mobile:mobile,
+      mobile: mobile,
       password: encryptedPassword,
     });
-    res.send({ status: "ok", data: "User Created" });
+
+    res.send({ status: "ok", data: savedUser });
+    
+    //  Emit the newly added user
+    io.emit("new_user_added", savedUser);
+
   } catch (error) {
-    res.send({ status: "error", data: error });
+    console.error("Registration error:", error);
+    res.status(500).send({ status: "error", message: "Registration failed", error });
   }
 });
-
 app.post("/login-user", async (req, res) => {
   const { email, password } = req.body;
-  console.log(req.body);
-  const oldUser = await User.findOne({ email: email });
 
-  if (!oldUser) {
-    return res.send({ data: "User doesn't exists!!" });
-  }
-
-  if (await bcrypt.compare(password, oldUser.password)) {
-    const token = jwt.sign({ email: oldUser.email }, JWT_SECRET);
-    console.log(token);
-    if (res.status(201)) {
-      return res.send({ status: "ok", data: token, user: {
-    _id: oldUser._id,
-    name: oldUser.name,
-    email: oldUser.email,
-    userType: oldUser.userType,
-    mobile: oldUser.mobile
-  }});
-    } else {
-      return res.send({ error: "error" });
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).send({ status: "error", message: "User not registered. Please sign up first." });
     }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).send({ status: "error", message: "Incorrect password" });
+    }
+
+    const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET, { expiresIn: "7d" });
+
+    return res.status(200).send({
+      status: "ok",
+      token,
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        userType: user.userType,
+        mobile: user.mobile,
+      },
+    });
+  } catch (err) {
+    console.error("Login error:", err);
+    return res.status(500).send({ status: "error", message: "Internal server error" });
   }
 });
 
