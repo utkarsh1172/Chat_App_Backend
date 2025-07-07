@@ -39,8 +39,8 @@ const io = new Server(server, {
   },
 });
 
-let onlineUsers = {};     // userId => socket.id
-let socketToUser = {};    // socket.id => userId
+let onlineUsers = {};     
+let socketToUser = {};    
 
 io.on("connection", (socket) => {
   console.log("✅ Connected:", socket.id);
@@ -53,7 +53,6 @@ io.on("connection", (socket) => {
     console.log(`👤 User ${userId} connected`);
   });
 
-  // Send message and store in DB
   socket.on("send_message", async ({ senderId, receiverId, message, image }) => {
   try {
     const newMessage = new Message({
@@ -109,7 +108,7 @@ app.post("/get-messages", async (req, res) => {
         { senderId, receiverId },
         { senderId: receiverId, receiverId: senderId },
       ],
-    }).sort({ timestamp: 1 }); // oldest to newest
+    }).sort({ timestamp: 1 }); 
 
     res.send({ status: "ok", data: messages });
   } catch (error) {
